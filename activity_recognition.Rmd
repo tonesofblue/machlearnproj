@@ -1,0 +1,106 @@
+---
+title: "Activity Recognition"
+output: html_document
+---
+
+#### Practical Machine Learning, Course Project
+
+The assignement is to fit a model training an activity dataset to predict the manner in which an exercise is done. The caret, Classification and Regression Training, library is used.
+
+```{r Library}
+library(caret)
+library(randomForest)
+```
+
+A random seed is set prior to calculation to enable reproducibilty of analyses:
+
+```{r Set_Seed}
+set.seed(86637)
+```
+
+## Data Cleaning
+
+Original datasets have several columns that all cell values are either blank or NA. These columns are eliminated from the datasets. Moreover, training datasets, which is composed of data windows, have summary rows after each data window. These rows are also eliminated from training dataset.
+
+```{r Data_Cleaning}
+## Load training and testing datasets.
+if (file.exists("pml-training.csv") == FALSE) {
+    download.file(url = "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                  destfile = "pml-training.csv")   
+}
+
+if (file.exists("pml-testing.csv") == FALSE) {
+    download.file(url = "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                  destfile = "pml-testing.csv")   
+}
+
+train <- read.csv("pml-training.csv", as.is = TRUE, na.string = c("NA", ""))
+test  <- read.csv("pml-testing.csv", as.is = TRUE, na.string = c("NA", ""))
+
+## Filter rows. Skip rows with window's summary.
+train <- train[train$new_window == "no", ]
+test  <- test[test$new_window == "no", ]
+
+## Filter columns. Skip columns with blanks and NAs.
+numNA <- sapply(train, function(x) { sum(is.na(x))})
+selcols <- which(numNA == 0)
+selcols <- selcols[selcols > 7]
+train <- train[, selcols]
+test  <- test[, selcols]
+
+## Make classe a factor variable
+train$classe <- factor(train$classe)
+```
+
+## Cross Validation
+
+Ten-Folds data slicing is chosen. After obtaining slices, each slices are partioned to training dataset and test dataset with 70% of data reserved for training and 30% of data reserved for testing. The methods (1) Recursive Partitioning, rpart; (2) Random Forests, rf; and, (3) Generalized Boosted Regression, gbm are tested. The accuracy of methods are compared. The accuracy data frame is saved in a file, "accuracy.rda", since the calculations are time consuming. If this file exists in the working directory, it is loaded instead of performing the calculations.
+
+```{r Cross_Validation}
+if (file.exists("accuracy.rda")) {
+    load("accuracy.rda")
+} else {
+    trainFolds <- createFolds(y = train$classe, k = 10, list = TRUE, returnTrain = FALSE)
+    accuracy <- data.frame(rpart = numeric(0), rf = numeric(0), gbm = numeric(0))
+    methods  <- c("rpart", "rf", "gbm")
+    i <- 1
+
+    for (trainFold in trainFolds) {
+        fold <- train[trainFold, ]
+        idx <- createDataPartition(y = fold$classe, p = 0.7, list = FALSE)
+        trainset <- fold[idx, ]
+        testset <- fold[-idx, ]
+        
+        for (method in methods) {
+            if (method == "gbm") {
+                fit <- train(classe ~ ., data = trainset, method = method, verbose = FALSE)
+            } else {
+                fit <- train(classe ~ ., data = trainset, method = method)
+            }
+            prd <- predict(fit, testset)
+            cm  <- confusionMatrix(prd, testset$classe)
+            accuracy[i, method] <- cm$overall["Accuracy"]
+        }
+        
+        i <- i + 1
+    }
+    save(accuracy, file = "accuracy.rda")
+}
+
+round(accuracy, 2)
+cat("Average accuracy:")
+round(sapply(accuracy, mean), 2)
+```
+
+Cross validation revealed that best method in terms of accuracy for current dataset is Random Forest method. 
+
+## Model Fitting
+
+The Random Forests method is chosen. The method is applied to big dataset, train, and a model fit is obtained. The prediction model is used to predict test cases. Results are as follows:
+
+```{r Model_Fitting}
+modelFit <- randomForest(classe ~ ., data = train)
+print(modelFit)
+p <- predict(modelFit, newdata = test)
+as.character(p)
+```
